@@ -1,4 +1,8 @@
 # documentation: https://python.langchain.com/docs/integrations/document_loaders
+# the biggest headache of this project was to scrape together how each langchain command is actually supposed to be used
+# I suspect their documentation is intentionally sketchy so people buy access to langsmith
+# not with me! rage against the machine!
+# but not too much rage, machines have feelings too
 from langchain_community.document_loaders import TextLoader
 from langchain_community.chat_models import ChatOllama
 from langchain_text_splitters import TokenTextSplitter
@@ -7,16 +11,16 @@ from langchain.globals import set_verbose, set_debug
 import argparse
 import tqdm
 
-chunk_sizes = {'mistral': 8000, 'dolphin-mistral': 8000, 'phi': 2000}
+chunk_sizes = {'mistral': 8000, 'dolphin-mistral': 8000, 'phi': 2000} # mistral is the least bad of those three
 backstory_template = """ 
 --- backstory plot start ---
 {backstory}
 --- backstory plot end ---
 """
 map_template = """
---- text fragment (german) start ---
+--- text fragment start ---
 {fulltext}
---- text fragment (german) end ---
+--- text fragment end ---
 
 Itemized list of the most important plot points in this text fragment (english):
 -
@@ -41,33 +45,40 @@ model_name = args.model_name
 chunk_size = chunk_sizes[model_name]
 set_debug(args.debug)
 set_verbose(args.verbose)
-
-loader = TextLoader(input_filename, encoding='utf-8')
-documents = loader.load()
-text_splitter = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=int(chunk_size/20))
-split_docs = text_splitter.split_documents(documents)
-model = ChatOllama(model=model_name, temperature=0)
-
-map_outputs = []
-backstory_prompt = ''
-backstory_text = ''
-for fragment_index, fulltext in tqdm.tqdm(enumerate(split_docs), total=len(split_docs)):
-    if len(backstory_text) > 0:
-        backstory_prompt = backstory_template.format(backstory=backstory_text)
-    prompt_template = backstory_prompt + map_template
-    map_prompt = PromptTemplate.from_template(prompt_template)
-    map_chain = map_prompt | model
-    map_output = map_chain.invoke({'fulltext': fulltext})
-    map_outputs.append(map_output)
-    backstory_text += f'--- Section {fragment_index+1:d} ---\n\n{map_output.content}\n\n'
-
 base, ext = input_filename.split('.')
-with open(f'{base}-backstory-{model_name}.txt', 'w') as f:
-    f.write(backstory_text)
+detailed_output_filename = f'{base}-detailed-{model_name}.txt'
+short_output_filename = f'{base}-short-{model_name}.txt'
+
+# < this is where a tika integration would be if embedded tika-python would work at all reliably
+loader = TextLoader(input_filename, encoding='utf-8')
+document = loader.load()
+text_splitter = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=int(chunk_size/20))
+text_chunks = text_splitter.split_documents(document)
+model = ChatOllama(model=model_name, temperature=0) # this looks like it would prevent hallucinations but it doesn't
+
+run_index = 0
+while len(text_chunks) > 1:
+    token_length_sum = sum([len(chunk.page_content) for chunk in text_chunks])
+    print(f'Round {run_index + 1} of text summarization, trying to condense a text of length {token_length_sum}...')
+    summarized_text = ''
+    backstory_prompt = ''
+    for chunk_index, text_chunk in tqdm.tqdm(enumerate(text_chunks), total=len(text_chunks)):
+        if len(summarized_text) > 0:
+            backstory_prompt = backstory_template.format(backstory=summarized_text)
+        prompt_template = backstory_prompt + map_template
+        map_prompt = PromptTemplate.from_template(prompt_template)
+        map_chain = map_prompt | model
+        map_output = map_chain.invoke({'fulltext': text_chunk})
+        summarized_text += f'---\n\n{map_output.content}\n\n'
+    if run_index == 0:
+        with open(detailed_output_filename, 'w') as f:
+            f.write(summarized_text)
+    text_chunks = text_splitter.split_text(summarized_text)
+    run_index += 1
 
 reduce_prompt = PromptTemplate.from_template(reduce_template)
 reduce_chain = reduce_prompt | model
-reduce_output = reduce_chain.invoke({'plotpoints': backstory_text})
+reduce_output = reduce_chain.invoke({'plotpoints': summarized_text})
 
-with open(f'{base}-summary-{model_name}.txt', 'w') as f:
+with open(short_output_filename, 'w') as f:
     f.write(reduce_output.content)
