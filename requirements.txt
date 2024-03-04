@@ -1,6 +1,12 @@
-langchain~=0.1.10
-langchain-community~=0.0.25
-langchain-experimental~=0.0.53
-tiktoken~=0.6.0
-transformers~=4.38.2
-unstructured~=0.12.5
+# for parsing epub
+beautifulsoup4
+ebooklib
+
+# for interacting with ollama
+ollama
+
+# for text pre-processing
+semantic-text-splitter
+
+# for user feedback
+tqdm
