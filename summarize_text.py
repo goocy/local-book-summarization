@@ -33,7 +33,7 @@ condense_template = """
 --- text fragment end ---
 
 Analysis items: most relevant plot events, time and locations, overall mood
-Itemized analysis of this text fragment (in english):
+Short itemized analysis of this text fragment (in english):
 -
 """
 synopsis_template = """
@@ -53,10 +53,12 @@ input_filename = args.input_filename
 base = input_filename.split('.')[0]
 detailed_output_filename = f'{base}-detailed.txt'
 short_output_filename = f'{base}-short.txt'
-chunk_size = 100000 # at a token limit of 64k, this should leave more than enough headroom to attach a backstory
-model_name = 'yarn-llama2'
+model_name = 'mistral'
+model_token_limit = 8*1024
+ollama_options = {'temperature': 0, 'num_ctx': model_token_limit, 'num_predict': 512, 'top_k': 20}
 
 # split the book into chunks
+chunk_size = int(model_token_limit * 1.6)
 input_text = extract_text_from_epub(input_filename)
 splitter = CharacterTextSplitter(trim_chunks=True)
 text_chunks = splitter.chunks(input_text, chunk_size)
@@ -68,13 +70,15 @@ while len(text_chunks) > 1:
     print(f'Round {run_index + 1} of text summarization, trying to condense a text of length {text_chunk_length:d}...')
     summarized_text = ''
     backstory_prompt = ''
-    for chunk_index, text_chunk in tqdm.tqdm(enumerate(text_chunks), total=len(text_chunks)):
+    for chunk_index, text_chunk in enumerate(text_chunks):
+        print(f'{chunk_index+1}/{len(text_chunks)}')
         if len(summarized_text) > 0:
             backstory_prompt = backstory_template.format(backstory=summarized_text)
         prompt_template = backstory_prompt + condense_template
         prompt = prompt_template.format(fulltext=text_chunk)
-        output = ollama.generate(model=model_name, prompt=prompt)
+        output = ollama.generate(model=model_name, prompt=prompt, options=ollama_options)
         response = output['response']
+        print(response)
         summarized_text += f'---\n\n{response}\n\n'
     if run_index == 0:
         with open(detailed_output_filename, 'w', encoding='utf-8') as f:
@@ -85,7 +89,7 @@ while len(text_chunks) > 1:
 
 print('Building a synopsis from the findings...')
 prompt = synopsis_template.format(plotpoints=summarized_text)
-output = ollama.generate(model=model_name, prompt=prompt)
+output = output = ollama.generate(model=model_name, prompt=prompt, options=ollama_options)
 response = output['response']
 
 with open(short_output_filename, 'w', encoding='utf-8') as f:
