@@ -4,9 +4,9 @@
 
 - install ollama (https://ollama.com/)
 
-- open a command line window and download yarn-llama2
+- open a command line window and download mistral
 
-```ollama pull yarn-llama2```
+```ollama pull mistral```
 
 
 ## Python stuff

@@ -56,6 +56,7 @@ short_output_filename = f'{base}-short.txt'
 model_name = 'mistral'
 model_token_limit = 8*1024
 ollama_options = {'temperature': 0, 'num_ctx': model_token_limit, 'num_predict': 512, 'top_k': 20}
+# more settings here https://github.com/ollama/ollama/blob/main/docs/modelfile.md#valid-parameters-and-values
 
 # split the book into chunks
 chunk_size = int(model_token_limit * 1.6)
