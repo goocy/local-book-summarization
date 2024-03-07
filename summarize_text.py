@@ -182,6 +182,9 @@ while True: # run iterative condensation rounds until the output is short enough
     while True: # process the incoming text in chunks
         # calculate the number of input sentences we can fit into this round's token limit
         condensed_token_length = measure_tokens(condensed_text, tokenizer)
+        if condensed_token_length > model_token_limit:
+            print('This book is too long to summarize with this model. Sorry.')
+            exit()
         placeholder_main_prompt = prompt_template.format(section_index=section_index, full_text='')
         placeholder_main_token_length = measure_tokens(placeholder_main_prompt, tokenizer)
         token_limit = model_token_limit - (condensed_token_length + placeholder_main_token_length)
