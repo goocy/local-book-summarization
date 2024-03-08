@@ -84,7 +84,7 @@ class Summarizer:
         tokens = self.tokenizer.encode(text)
         return len(tokens.ids)
 
-    def calculate_text_split(self, text, token_limit, from_the_end=False):
+    def calculate_text_split(self, text, token_limit, from_the_end=False, contingency=True):
         if len(text) == 0:
             return '', None
 
@@ -111,7 +111,7 @@ class Summarizer:
             chunk_length += len(sentence)
             remainder_length -= len(sentence)
             # Contingency case: before the remainder gets too short, we'd rather not try to fill the token limit
-            if chunk_length > remainder_length:
+            if contingency and chunk_length > remainder_length:
                 break
 
         # convert the sentence index into a character index
@@ -130,8 +130,10 @@ class Summarizer:
 
         # weak backstory means that we forget the first part of the context once our context space is exceeded
         if self.backstory_strength == 'weak':
-            split_index = self.calculate_text_split(context, context_token_limit, from_the_end=True)
-            return context[split_index:]
+            split_index = self.calculate_text_split(context, context_token_limit, from_the_end=True, contingency=False)
+            discard_ratio = 1 - split_index / len(context)
+            print(f'Context limit exceeded, discarding the first {discard_ratio:.0%} of the context...')
+            return context[-split_index:]
 
         # strong backstory means that we condense the previous condensed context even further
         input_context = context
