@@ -132,7 +132,7 @@ class Summarizer:
         if self.backstory_strength == 'weak':
             split_index = self.calculate_text_split(context, context_token_limit, from_the_end=True, contingency=False)
             discard_ratio = 1 - split_index / len(context)
-            print(f'Context limit exceeded, discarding the first {discard_ratio:.0%} of the context...')
+            print(f'Context limit exceeded, omitting the first {discard_ratio:.0%} of this round\'s context...')
             return context[-split_index:]
 
         # strong backstory means that we condense the previous condensed context even further
@@ -176,9 +176,8 @@ class Summarizer:
         response = output['response']
         processing_time = output['total_duration'] / 1000000000
         if split_index is not None:
-            print(f'...processed {split_index:d} characters in {processing_time:.0f} seconds.')
             processing_speed = split_index / processing_time
-            print(f'{processing_speed:.0f} chars per second')
+            print(f'...processed {split_index:d} characters in {processing_time:.0f} seconds ({processing_speed:.0f} ch/s).')
             print(f'Remaining text length: {len(input_text)-split_index:d} characters')
         return response, split_index
 
@@ -196,7 +195,7 @@ class Summarizer:
             self.responses.append([])
             while True:
                 # process the text in chunks small enough to fit into the LLM's context window
-                print(f'\nRound {run_index+1:d}-{section_index+1:d} starting...')
+                print(f'\nRound {run_index+1:d}-{section_index+1:d}...')
                 response, text_split_index = self.condense_text(input_text, condensed_text)
 
                 # store the results
