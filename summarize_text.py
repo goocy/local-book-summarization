@@ -8,13 +8,13 @@ import json
 import os
 
 class Summarizer:
-    def __init__(self, include_backstory):
+    def __init__(self, backstory_strength):
         self.model_name = 'mistral'
         self.tokenizer = tokenizers.Tokenizer.from_pretrained('mistralai/Mistral-7B-v0.1')
         self.reasonable_text_length = 2000
-        self.model_token_limit = 4*1024 # anyone who tells you that Mistral can process 8k token is lying
-        self.context_ratio = 0.5  # context is allowed to take up this much context window space
-        self.include_backstory = include_backstory
+        self.model_token_limit = 4*1024 # anyone who tells you that Mistral can process 8k tokens is lying
+        self.context_ratio = 0.5  # context is allowed to take up this percentage of the context window space before we start compressing context
+        self.backstory_strength = backstory_strength
         self.ollama_options = {
             'num_ctx': self.model_token_limit,
             'temperature': 0.0,
@@ -67,6 +67,7 @@ class Summarizer:
             return f.read()
 
     def load_json(self, json_path):
+        # this is specific to the Discord chatlog format
         content = None
         with open(json_path, 'r', encoding='utf-8') as f:
             content = json.load(f)
@@ -94,7 +95,7 @@ class Summarizer:
         # Avoid splitting the text in the middle of a sentence
         sentences = sentence_splitter.split(text)
         if from_the_end:
-            sentences = reversed(sentences)
+            sentences.reverse()
 
         # Do a virtual run through all sentences to see how many we can fit into the token limit
         chunk_length = 0
@@ -128,9 +129,9 @@ class Summarizer:
             return context
 
         # weak backstory means that we forget the first part of the context once our context space is exceeded
-        if self.include_backstory == 'weak':
+        if self.backstory_strength == 'weak':
             split_index = self.calculate_text_split(context, context_token_limit, from_the_end=True)
-            return context[:-split_index]
+            return context[split_index:]
 
         # strong backstory means that we condense the previous condensed context even further
         input_context = context
@@ -172,8 +173,8 @@ class Summarizer:
         # gather the LLM output
         response = output['response']
         processing_time = output['total_duration'] / 1000000000
-        print(f'...processed {split_index:d} characters in {processing_time:.0f} seconds.')
         if split_index is not None:
+            print(f'...processed {split_index:d} characters in {processing_time:.0f} seconds.')
             processing_speed = split_index / processing_time
             print(f'{processing_speed:.0f} chars per second')
             print(f'Remaining text length: {len(input_text)-split_index:d} characters')
@@ -205,7 +206,7 @@ class Summarizer:
 
                 # not done? aw. prepare for the next round
                 section_index += 1
-                if self.include_backstory in ('weak', 'strong'):
+                if self.backstory_strength in ('weak', 'strong'):
                     condensed_text = self.create_context(run_index, section_index)
                 else:
                     condensed_text = ''
