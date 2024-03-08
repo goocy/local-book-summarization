@@ -4,18 +4,17 @@ import ebooklib.epub
 import tokenizers
 import argparse
 import ollama
+import json
+import os
 
-
-class BookSummarizer:
-    def __init__(self, input_filename):
-        base = input_filename.split('.')[0]
-        self.detailed_output_filename = f'{base}-detailed.txt'
-        self.short_output_filename = f'{base}-short.txt'
+class Summarizer:
+    def __init__(self, include_backstory):
         self.model_name = 'mistral'
         self.tokenizer = tokenizers.Tokenizer.from_pretrained('mistralai/Mistral-7B-v0.1')
         self.reasonable_text_length = 2000
-        self.model_token_limit = 4*1024 # whoever tells you that Mistral
+        self.model_token_limit = 4*1024 # anyone who tells you that Mistral can process 8k token is lying
         self.context_ratio = 0.5  # context is allowed to take up this much context window space
+        self.include_backstory = include_backstory
         self.ollama_options = {
             'num_ctx': self.model_token_limit,
             'temperature': 0.0,
@@ -28,17 +27,28 @@ class BookSummarizer:
         {backstory}
         --- End of backstory ---
 
-        --- Start new section ---
+        --- Start of text section ---
         {full_text}
-        --- End new section ---
+        --- End of text section ---
 
-        Summary focus: most relevant plot events, time and locations, overall mood
-        Summary format: english, 3-5 sentences, chapter numbers are irrelevant
-        Summary of new section:
+        Summary format: english, 3-5 sentences
+        Summary of text section:
 
         """
 
-    def extract_text_from_epub(self, epub_path):
+    def load(self, input_filepath):
+        filename = os.path.split(input_filepath)[-1]
+        base, ext = os.path.splitext(filename)
+        self.detailed_output_filename = f'{base}-detailed.txt'
+        self.short_output_filename = f'{base}-short.txt'
+        if input_filepath.endswith('.epub'):
+            return self.load_epub(input_filepath)
+        elif input_filepath.endswith('.json'):
+            return self.load_json(input_filepath)
+        else:
+            return self.load_txt(input_filepath)
+
+    def load_epub(self, epub_path):
         book = ebooklib.epub.read_epub(epub_path)
         items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
         full_text = ''
@@ -52,11 +62,28 @@ class BookSummarizer:
             full_text += section
         return full_text
 
+    def load_txt(self, txt_path):
+        with open(txt_path, 'r', encoding='utf-8') as f:
+            return f.read()
+
+    def load_json(self, json_path):
+        content = None
+        with open(json_path, 'r', encoding='utf-8') as f:
+            content = json.load(f)
+        if content is None:
+            raise ValueError('The JSON file could not be read.')
+        messages = ''
+        for message in content['messages']:
+            author = message['author']['name']
+            content = message['content']
+            messages += f'{author}: {content}\n'
+        return messages
+
     def measure_tokens(self, text):
         tokens = self.tokenizer.encode(text)
         return len(tokens.ids)
 
-    def calculate_text_split(self, text, token_limit):
+    def calculate_text_split(self, text, token_limit, from_the_end=False):
         if len(text) == 0:
             return '', None
 
@@ -66,6 +93,8 @@ class BookSummarizer:
 
         # Avoid splitting the text in the middle of a sentence
         sentences = sentence_splitter.split(text)
+        if from_the_end:
+            sentences = reversed(sentences)
 
         # Do a virtual run through all sentences to see how many we can fit into the token limit
         chunk_length = 0
@@ -89,27 +118,25 @@ class BookSummarizer:
         return text_index
 
     def create_context(self, round_index, section_index):
-        # if section_index is None, we concatenate all the responses associated with this round
-        if section_index is None:
-            responses = self.responses[round_index]
-            context = ''.join(responses)
-            return context
-
-        # no? ok this means we're not finished with this round yet
-        # but we can still try to do the same thing: concatenate everything we have *so far* from this round
         responses = self.responses[round_index]
-        context = ''.join(responses)
-        # except this time we need to be careful to not take up too much room in the context window
+        context = '\n\n'.join(responses)
+
+        # check if we take up too much room in the context window
         context_token_size = self.measure_tokens(context)
-        if context_token_size < self.model_token_limit * self.context_ratio:
-            # yay the simple approach worked
+        context_token_limit = self.model_token_limit * self.context_ratio
+        if context_token_size < context_token_limit:
             return context
 
-        # oof we need to summarize the context before we can continue
-        # I know this could be fully recursive but I'm scared to debug a recursive method
+        # weak backstory means that we forget the first part of the context once our context space is exceeded
+        if self.include_backstory == 'weak':
+            split_index = self.calculate_text_split(context, context_token_limit, from_the_end=True)
+            return context[:-split_index]
+
+        # strong backstory means that we condense the previous condensed context even further
         input_context = context
         condensed_context = ''
         print(f'\nCondensing previous context of round {round_index+1:d} before continuing...')
+        # this needs to be done every time a new text chunk comes in, so it takes more time overall
         while True:
             # process the text in chunks small enough to fit into the LLM's context window
             condensate, context_split_index = self.condense_text(input_context, condensed_context)
@@ -125,13 +152,12 @@ class BookSummarizer:
         print('...finished.')
         return condensed_context
 
-
     def condense_text(self, input_text, condensed_text):
         # measure the structural (invariant) parts of the prompt
         placeholder_prompt = self.prompt_template.format(full_text='', backstory=condensed_text)
         placeholder_token_length = self.measure_tokens(placeholder_prompt)
         if placeholder_token_length > self.model_token_limit:
-            raise ValueError('This book is too long to summarize, at least for now. Sorry. Please check back in a few weeks.')
+            raise ValueError('This text is too long to summarize, at least with the default network. Try using one with a longer context window!')
 
         # try to squeeze as much input text as close as possible into the prompt
         token_limit = self.model_token_limit - placeholder_token_length
@@ -146,14 +172,14 @@ class BookSummarizer:
         # gather the LLM output
         response = output['response']
         processing_time = output['total_duration'] / 1000000000
+        print(f'...processed {split_index:d} characters in {processing_time:.0f} seconds.')
         if split_index is not None:
-            print(f'...processed {split_index:d} characters in {processing_time:.0f} seconds.')
-            print(f'Remaining text length: {len(input_text)-split_index:d} characters')
             processing_speed = split_index / processing_time
             print(f'{processing_speed:.0f} chars per second')
+            print(f'Remaining text length: {len(input_text)-split_index:d} characters')
         return response, split_index
 
-    def summarize_book(self, input_text):
+    def summarize(self, input_text):
         input_token_length = self.measure_tokens(input_text)
         input_text_length = len(input_text)
         print(f'Trying to condense {input_text_length:d} characters ({input_token_length:d} tokens)...')
@@ -179,7 +205,10 @@ class BookSummarizer:
 
                 # not done? aw. prepare for the next round
                 section_index += 1
-                condensed_text = self.create_context(run_index, section_index)
+                if self.include_backstory in ('weak', 'strong'):
+                    condensed_text = self.create_context(run_index, section_index)
+                else:
+                    condensed_text = ''
                 input_text = input_text[text_split_index:]
 
             condensation_factor = 1 - len(condensed_text) / input_text_length
@@ -206,14 +235,16 @@ class BookSummarizer:
 
 
 def main():
-    arg_parser = argparse.ArgumentParser(description='Summarize a text file using a transformer model')
-    arg_parser.add_argument('input_filename', help='The name of the input file to summarize')
+    arg_parser = argparse.ArgumentParser(description='Summarize a large text file using a transformer model')
+    arg_parser.add_argument('input_filepath', help='The path to the input file to summarize')
+    arg_parser.add_argument('--backstory_strength', default='strong', help='How strongly the the previous context should be tracked (none/weak/strong)')
     args = arg_parser.parse_args()
-    input_filename = args.input_filename
+    input_filepath = args.input_filepath
+    backstory_strength = args.backstory_strength
 
-    book_summarizer = BookSummarizer(input_filename)
-    input_text = book_summarizer.extract_text_from_epub(input_filename)
-    condensed_text = book_summarizer.summarize_book(input_text)
+    book_summarizer = Summarizer(backstory_strength)
+    input_text = book_summarizer.load(input_filepath)
+    condensed_text = book_summarizer.summarize(input_text)
 
 if __name__ == '__main__':
     main()
