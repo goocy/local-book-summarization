@@ -35,7 +35,7 @@ class Summarizer:
         {full_text}
         --- End of text section ---
 
-        Summary format: english, 3-5 sentences
+        Summary format: english, 3-5 sentences, no titles
         Summary of text section:
         
         """
