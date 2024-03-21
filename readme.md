@@ -32,11 +32,11 @@
 
 # Run
 
-``` python summarize_text.py your_text_file.txt ```
+``` python summarize_text.py folder_with_books ```
 
 ``````
 
 # Core idea
 
 So you have a book or several million and you don't live long enough to read them all but maybe you kinda want to know what happens in one of them. Or you're listening to an audiobook and want to see if it's safe to skip ahead or you keep losing the plot and want to fill up the gaps with a little cheat sheet.
-This is what this project is for. Point to a .epub file, and it spits out a summary of the plot. One detailed, one short.
+This is what this project is for. Point to an ebook, and it spits out a summary of the plot. One detailed, one short.
