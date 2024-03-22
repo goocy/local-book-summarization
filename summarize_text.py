@@ -365,8 +365,7 @@ def main():
             print(f'Summary already exists for {filename}')
             continue
         print(f'Summarizing {filename}...')
-        start_index = int(len(input_text) * 0.8)
-        condensed_text = book_summarizer.summarize(input_text[start_index:])
+        condensed_text = book_summarizer.summarize(input_text)
 
 if __name__ == '__main__':
     main()
