@@ -349,7 +349,7 @@ def main():
     args = arg_parser.parse_args()
     book_folderpath = args.book_folderpath
     backstory_strength = args.backstory_strength
-    valid_extensions = '.epub', '.txt', '.json'
+    valid_extensions = '.epub', '.txt', '.json', '.pdf'
 
     book_summarizer = Summarizer(backstory_strength)
     for filename in os.listdir(book_folderpath):
