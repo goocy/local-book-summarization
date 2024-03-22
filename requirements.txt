@@ -2,6 +2,9 @@
 beautifulsoup4
 ebooklib
 
+# for parsing pdf
+PyMuPDF
+
 # for interacting with ollama
 ollama
 

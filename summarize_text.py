@@ -1,4 +1,4 @@
-import pickle
+
 
 import sentence_splitter
 from bs4 import BeautifulSoup
@@ -6,6 +6,7 @@ import ebooklib.epub
 import tokenizers
 import argparse
 import ollama
+import fitz
 import json
 import os
 
@@ -35,7 +36,7 @@ class Summarizer:
         {full_text}
         --- End of text section ---
 
-        Summary format: english, 3-5 sentences, no titles
+        Summary format: english, 3-5 sentences, ignoring section titles and backstory
         Summary of text section:
         
         """
@@ -52,8 +53,15 @@ class Summarizer:
             return self.load_epub(input_filepath)
         elif input_filepath.endswith('.json'):
             return self.load_json(input_filepath)
+        elif input_filepath.endswith('.pdf'):
+            with fitz.open(input_filepath) as doc:
+                text = ""
+                for page in doc:
+                    text += page.get_text()
+            return(text)
         else:
-            return self.load_txt(input_filepath)
+            with open(input_filepath, 'r', encoding='utf-8') as f:
+                return f.read()
 
     def load_epub(self, epub_path):
         book = ebooklib.epub.read_epub(epub_path)
@@ -69,9 +77,6 @@ class Summarizer:
             full_text += section
         return full_text
 
-    def load_txt(self, txt_path):
-        with open(txt_path, 'r', encoding='utf-8') as f:
-            return f.read()
 
     def load_json(self, json_path):
         # this is specific to the Discord chatlog format
@@ -92,6 +97,74 @@ class Summarizer:
         return len(tokens.ids)
 
     def split_text(self, text, token_limit, from_the_end=False, contingency=True):
+
+        def ceil(n):
+            return int(-1 * n // 1 * -1)
+
+        def chunk(in_string, num_chunks, separator=''):
+            # https://stackoverflow.com/questions/22571259/split-a-string-into-n-equal-parts
+            chunk_size = len(in_string) // num_chunks
+            if len(in_string) % num_chunks: chunk_size += 1
+            iterator = iter(in_string)
+            for _ in range(num_chunks):
+                accumulator = list()
+                for _ in range(chunk_size):
+                    try:
+                        accumulator.append(next(iterator))
+                    except StopIteration:
+                        break
+                yield separator.join(accumulator)
+
+        def find_most_common_separator(sentence):
+            # find the most common non-alphanumeric character in this sentence
+            all_chars = set(sentence)
+            separators = [c for c in all_chars if not c.isalnum()]
+            if len(separators) == 0:
+                return None
+            separator_counts = {c: sentence.count(c) for c in separators}
+            most_common_separator = max(separator_counts, key=separator_counts.get)
+            return most_common_separator
+
+        def split_sentence(sentence, target_part_count):
+            separator = find_most_common_separator(sentence)
+            if separator is None:
+                # fuck it, we tried. split it into equal parts
+                return chunk(sentence, target_part_count)
+            sentence_atoms = sentence.split(separator)
+            sentence_sections = chunk(sentence_atoms, target_part_count, separator)
+            return list(sentence_sections)
+
+        def split_long_sentences(sentences, token_limit):
+            potential_long_sentences = False
+            for sentence in sentences:
+                if len(sentence) > token_limit:  # cheap lower estimate
+                    potential_long_sentences = True
+                    break
+            if potential_long_sentences:
+                for i, sentence in enumerate(sentences):
+                    sentence_length = self.measure_tokens(sentence)  # more expensive precise measurement
+                    if sentence_length > token_limit:
+                        target_part_count = int(ceil(sentence_length / token_limit))
+                        sentence_parts = split_sentence(sentence, target_part_count)
+                        sentences.pop(i)
+                        sentences.extend(sentence_parts)
+            return sentences
+
+        def find_best_split_point(sentences, token_limit):
+            low = 0
+            high = len(sentences)
+            best_split_point = 0
+            while low < high:
+                mid = (low + high) // 2
+                first_part_test = ' '.join(sentences[:mid])
+                test_length = self.measure_tokens(first_part_test)
+                if test_length < token_limit:
+                    best_split_point = mid  # this split is valid, might be the best one so far
+                    low = mid + 1  # look for a split that allows more text in the first part
+                else:
+                    high = mid  # look for a split that puts less text in the first part
+            return best_split_point
+
         if len(text) == 0:
             return '', ''
 
@@ -107,39 +180,32 @@ class Summarizer:
 
         # Contingency: if we're not more than twice over the token limit, we should split the text in half
         if contingency:
-            if text_length < token_limit * 2:
-                token_limit = text_length // 2
+            if text_length < token_limit * 1.9:
+                token_limit = int(text_length * 0.5)
 
         # Run a binary search to find the split point that fits the maximum amount of text into the token limit
-        low = 0
-        high = len(sentences)
-        best_split_point = 0
-        while low < high:
-            mid = (low + high) // 2
-            first_part_test = ' '.join(sentences[:mid])
-            test_length = self.measure_tokens(first_part_test)
-            if test_length < token_limit:
-                best_split_point = mid  # this split is valid, might be the best one so far
-                low = mid + 1  # look for a split that allows more text in the first part
-            else:
-                high = mid  # look for a split that puts less text in the first part
-        sentence_split_point = best_split_point
+        sentence_split_point = find_best_split_point(sentences, token_limit)
 
+        # check if we managed to split the text at all
+        if sentence_split_point == 0:
+            # Contingency: if a sentence is above the token limit (rare but it can happen), we split it in equal parts
+            sentences = split_long_sentences(sentences, token_limit)
+            # try splitting again
+            sentence_split_point = find_best_split_point(sentences, token_limit)
+
+        # recombine the two sentence lists
+        remaining_part = ''
         if from_the_end:
             sentences.reverse()
             last_part = ' '.join(sentences[-sentence_split_point:])
-            if sentence_split_point == len(sentences):
-                remaining_part = ''
-            else:
+            if sentence_split_point < len(sentences):
                 remaining_part = ' '.join(sentences[:-sentence_split_point])
             return last_part, remaining_part
-
-        first_part = ' '.join(sentences[:sentence_split_point])
-        if sentence_split_point == len(sentences):
-            remaining_part = ''
         else:
-            remaining_part = ' '.join(sentences[sentence_split_point:])
-        return first_part, remaining_part
+            first_part = ' '.join(sentences[:sentence_split_point])
+            if sentence_split_point < len(sentences):
+                remaining_part = ' '.join(sentences[sentence_split_point:])
+            return first_part, remaining_part
 
     def create_context(self, round_index, section_index):
         responses = self.responses[round_index]
@@ -161,11 +227,11 @@ class Summarizer:
         # strong backstory means that we condense the previous condensed context even further
         input_context = context
         condensed_context = ''
-        input_context_length = self.measure_tokens(input_context)
-        print(f'\nCondensing {input_context_length:d} tokens of context before continuing...')
+        sub_round_letter = 'a'
         # this needs to be done every time a new text chunk comes in, so it takes more time overall
         while True:
             # process the text in chunks small enough to fit into the LLM's context window
+            print(f'\nSub-round {sub_round_letter}...')
             condensate, remaining_context = self.condense_text(input_context, condensed_context)
             condensed_context += condensate
 
@@ -175,14 +241,15 @@ class Summarizer:
 
             # not done? aw. prepare for the next round
             input_context = remaining_context
+            sub_round_letter = chr(ord(sub_round_letter) + 1)
 
         print('...finished.')
         return condensed_context
 
-    def condense_text(self, input_text, condensed_text):
+    def condense_text(self, input_text, backstory=''):
         # check if the invariate parts of the prompt exceed our token limit
-        if len(condensed_text) > 0:
-            summary_prompt = self.summary_template.format(backstory=condensed_text)
+        if len(backstory) > 0:
+            summary_prompt = self.summary_template.format(backstory=backstory)
             summary_length = self.measure_tokens(summary_prompt)
         else:
             summary_prompt = ''
@@ -201,8 +268,8 @@ class Summarizer:
         # ask an LLM to condense the full text for us
         text_chunk_length = self.measure_tokens(text_chunk)
         overhead_ratio = (prompt_length - text_chunk_length) / self.model_token_limit
-        print(f'New prompt: {text_chunk_length:d} tokens of text plus {overhead_ratio:.0%} overhead')
-        print(f'Sending {prompt_length:d} tokens to the LLM...')
+        print(f'Processing {text_chunk_length:d} tokens of text plus {overhead_ratio:.0%} overhead...')
+        #print(f'Sending {prompt_length:d} tokens to the LLM...')
         output = ollama.generate(model=self.model_name, prompt=prompt, options=self.ollama_options)
 
         # gather the LLM output
@@ -213,7 +280,7 @@ class Summarizer:
             remaining_text_length = self.measure_tokens(remaining_chunk)
             processing_speed = (prompt_length + response_length) / processing_time
             print(f'...finished in {processing_time:.0f} seconds ({processing_speed:.0f} t/s).')
-            print(f'LLM summary: {response_length:d} tokens')
+            #print(f'LLM summary: {response_length:d} tokens')
             print(f'Remaining input text: {remaining_text_length:d} tokens')
         return response, remaining_chunk
 
@@ -227,7 +294,8 @@ class Summarizer:
             # run the compression stage, replacing the input text with the condensed text, until the output is short enough
             condensed_text = ''
             section_index = 0
-            self.responses.append([])
+            if len(self.responses) <= run_index:
+                self.responses.append([])
             while True:
                 # process the text in chunks small enough to fit into the LLM's context window
                 print(f'\nRound {run_index+1:d}-{section_index+1:d}...')
@@ -253,7 +321,7 @@ class Summarizer:
             condensation_factor = 1 - self.measure_tokens(summary_text) / input_text_length
             print(f'...finished round {run_index+1:d}! Condensed the text by {condensation_factor:.2%}.')
 
-            # write out the raw responses at the start of round 0
+            # write out the raw responses at the end of round 0
             if run_index == 0:
                 with open(self.detailed_output_filepath, 'w', encoding='utf-8') as f:
                     merged_responses = '\n\n'.join(self.responses[0])
@@ -297,7 +365,8 @@ def main():
             print(f'Summary already exists for {filename}')
             continue
         print(f'Summarizing {filename}...')
-        condensed_text = book_summarizer.summarize(input_text)
+        start_index = int(len(input_text) * 0.8)
+        condensed_text = book_summarizer.summarize(input_text[start_index:])
 
 if __name__ == '__main__':
     main()
