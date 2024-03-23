@@ -92,7 +92,7 @@ class Summarizer:
 		tokens = self.tokenizer.encode(text)
 		return len(tokens.ids)
 
-	def split_text(self, text, token_limit, from_the_end=False, contingency=True):
+	def split_text(self, text, token_limit):
 
 		def ceil(n):
 			return int(-1 * n // 1 * -1)
@@ -161,6 +161,16 @@ class Summarizer:
 					high = mid  # look for a split that puts less text in the first part
 			return best_split_point
 
+		def chunk_in_half(sentences):
+			if len(sentences) == 1:
+				sentences = split_sentence(sentences[0], 2)
+			half = len(sentences) // 2
+			first_half = ' '.join(sentences[:half])
+			second_half = ' '.join(sentences[half:])
+			return first_half, second_half
+
+		# TODO: avoid splitting and merging sentences every time
+
 		if len(text) == 0:
 			return '', ''
 
@@ -171,19 +181,17 @@ class Summarizer:
 
 		# Avoid splitting the text in the middle of a sentence
 		sentences = sentence_splitter.split(text)
-		if from_the_end:
-			sentences.reverse()
 
 		# Contingency: if we're not more than twice over the token limit, we should split the text in half
-		if contingency:
-			if text_length < token_limit * 1.9 and text_length > token_limit:
-				token_limit = int(text_length * 0.5)
+		if text_length < token_limit * 1.9 and text_length > token_limit:
+			first_half, second_half = chunk_in_half(sentences)
+			return first_half, second_half
 
 		# Run a binary search to find the split point that fits the maximum amount of text into the token limit
 		sentence_split_point = find_best_split_point(sentences, token_limit)
 
-		# check if we managed to split the text at all
-		if sentence_split_point == 0:
+		# check if we failed to split the text
+		if sentence_split_point == 0 or sentence_split_point == len(sentences):
 			# Contingency: if a sentence is above the token limit (rare but it can happen), we split it in equal parts
 			sentences = split_long_sentences(sentences, token_limit)
 			# try splitting again
@@ -191,17 +199,10 @@ class Summarizer:
 
 		# recombine the two sentence lists
 		remaining_part = ''
-		if from_the_end:
-			sentences.reverse()
-			last_part = ' '.join(sentences[-sentence_split_point:])
-			if sentence_split_point < len(sentences):
-				remaining_part = ' '.join(sentences[:-sentence_split_point])
-			return last_part, remaining_part
-		else:
-			first_part = ' '.join(sentences[:sentence_split_point])
-			if sentence_split_point < len(sentences):
-				remaining_part = ' '.join(sentences[sentence_split_point:])
-			return first_part, remaining_part
+		first_part = ' '.join(sentences[:sentence_split_point])
+		if sentence_split_point < len(sentences):
+			remaining_part = ' '.join(sentences[sentence_split_point:])
+		return first_part, remaining_part
 
 	def create_context(self, round_index, section_index):
 		responses = self.responses[round_index]
