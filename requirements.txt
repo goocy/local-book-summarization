@@ -10,6 +10,7 @@ ollama
 
 # for text pre-processing
 semantic-text-splitter
+tokenizers
 
 # for user feedback
 tqdm
