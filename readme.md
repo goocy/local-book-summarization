@@ -21,7 +21,7 @@
 
 - activate virtual environment
 
-    Windows: ``` venv\scripts\activate ```
+    Windows: ``` venv\scripts\activate.bat ```
 
     Linux: you already know this better than I do
 

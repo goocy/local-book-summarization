@@ -4,7 +4,7 @@ import os
 
 def main():
     arg_parser = argparse.ArgumentParser(description='Summarize a large text file using a transformer model')
-    arg_parser.add_argument('book_folderpath', help='The path to the folder that contains books')
+    arg_parser.add_argument('--book_folderpath', default='books', help='The path to the folder that contains books')
     arg_parser.add_argument('--backstory_strength', default='strong', help='How strongly the the previous context should be tracked (none/weak/strong)')
     args = arg_parser.parse_args()
     book_folderpath = args.book_folderpath

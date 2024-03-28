@@ -274,7 +274,8 @@ class Summarizer:
 		# gather the LLM output
 		response = output['response']
 		response_length = self.measure_tokens(response)
-		processing_time = output['total_duration'] / 1000000000
+		# ollama api defines total_duration as omitted if empty, defaulting to a value of 1.
+		processing_time = (output['total_duration'] / 1000000000) if 'total_duration' in output else 1
 		if len(text_chunk) is not None:
 			remaining_text_length = self.measure_tokens(remaining_chunk)
 			processing_speed = (prompt_length + response_length) / processing_time
