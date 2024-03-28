@@ -216,8 +216,7 @@ class Summarizer:
 
 		# weak backstory means that we forget the first part of the context once our context space is exceeded
 		if self.backstory_strength == 'weak' and section_index is not None:
-			text_chunk, remaining_chunk = self.split_text(context, context_token_limit, from_the_end=True,
-														  contingency=False)
+			text_chunk, remaining_chunk = self.split_text(context, context_token_limit, from_the_end=True, contingency=False)
 			discard_ratio = len(remaining_chunk) / len(context)
 			print(f'Context limit exceeded, omitting the first {discard_ratio:.0%} of context...')
 			return text_chunk
@@ -274,11 +273,14 @@ class Summarizer:
 		# gather the LLM output
 		response = output['response']
 		response_length = self.measure_tokens(response)
-		processing_time = output['total_duration'] / 1000000000
-		if len(text_chunk) is not None:
-			remaining_text_length = self.measure_tokens(remaining_chunk)
+		processing_time = output['total_duration'] / 1000000000 if 'total_duration' in output else None
+		if processing_time is not None:
 			processing_speed = (prompt_length + response_length) / processing_time
 			print(f'...finished in {processing_time:.0f} seconds ({processing_speed:.0f} t/s).')
+		else:
+			print('...finished.')
+		if len(text_chunk) is not None:
+			remaining_text_length = self.measure_tokens(remaining_chunk)
 			# print(f'LLM summary: {response_length:d} tokens')
 			print(f'Remaining input text: {remaining_text_length:d} tokens')
 		return response, remaining_chunk
