@@ -1,0 +1,39 @@
+# Model configuration
+model_name: 'mistral'
+tokenizer_name: 'mistralai/Mistral-7B-v0.1'
+
+# Token limits and settings
+model_token_limit: 4096  # anyone who tells you that Mistral can process 8k tokens is lying
+context_ratio: 0.5  # context is allowed to take up this percentage of the context window space before we start compressing context
+reasonable_text_length: 2000
+
+# Prompt templates
+summary_template: |
+  --- Start of backstory ---
+  {backstory}
+  --- End of backstory ---
+
+prompt_template: |
+  --- Start of text section ---
+  {full_text}
+  --- End of text section ---
+
+  Summary format: english, 3-5 sentences, ignoring section titles and backstory
+  Summary of text section:
+
+# Backstory settings
+backstory_strength: 'strong'  # How strongly the previous context should be tracked (none/weak/strong)
+response_separator: '\n\n---\n\n'
+
+# ollama library options
+ollama_options:
+  num_ctx: 4096
+  temperature: 0.0
+  num_predict: 512
+  top_k: 20
+  top_p: 0.5
+
+# Output settings
+output_filenames:
+  detailed: '{base}-detailed.txt'
+  short: '{base}-short.txt'
