@@ -22,6 +22,9 @@ def main():
     # Initialize Summarizer instance
     summarizer = Summarizer(config)
 
+    # run a very small speed test
+    summarizer.speed_test()
+
     # Process each book in the folder
     for filename in os.listdir(book_folderpath):
 

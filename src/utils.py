@@ -13,7 +13,7 @@ def find_most_common_separator(text):
     most_common_separator = max(separator_counts, key=separator_counts.get)
     return most_common_separator
 
-def split_sentence(sentence, target_part_count, separator=None):
+def split_sentence(sentence: str, target_part_count: int, separator=None):
     if separator is None:
         separator = find_most_common_separator(sentence)
     if separator is None:
@@ -36,14 +36,6 @@ def chunk(in_string, num_chunks, separator=''):
             except StopIteration:
                 break
         yield separator.join(accumulator)
-
-def chunk_in_half(sentences):
-    if len(sentences) == 1:
-        sentences = split_sentence(sentences[0], 2)
-    half = len(sentences) // 2
-    first_half = ' '.join(sentences[:half])
-    second_half = ' '.join(sentences[half:])
-    return first_half, second_half
 
 def ceil(n):
     return int(-1 * n // 1 * -1)

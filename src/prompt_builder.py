@@ -5,6 +5,8 @@ class PromptBuilder:
         self.prompt_template = config['prompt_template']
 
     def build_summary_prompt(self, backstory):
+        if len(backstory) == 0:
+            return ''
         return self.summary_template.format(backstory=backstory)
 
     def build_main_prompt(self, text_chunk):
